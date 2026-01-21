@@ -41,11 +41,11 @@ async def chat(
     message: ChatMessage,
     api_key: str = Depends(verify_api_key)
 ):
-    """Envoie un message de chat et obtient une réponse RAG."""
+    """Send a chat message and get a RAG response."""
     try:
         rag_chain = get_rag_chain()
         
-        # Exécuter la requête dans un thread pool pour éviter de bloquer
+        # Execute request in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
@@ -60,8 +60,8 @@ async def chat(
             sources=result.get("sources", [])
         )
     except Exception as e:
-        logger.error(f"Erreur lors du traitement du message de chat: {e}")
-        raise HTTPException(status_code=500, detail=f"Erreur lors du traitement du message: {str(e)}")
+        logger.error(f"Error processing chat message: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
 
 
 @router.post("/stream")
@@ -69,12 +69,12 @@ async def chat_stream(
     message: ChatMessage,
     api_key: str = Depends(verify_api_key)
 ):
-    """Stream la réponse du chat."""
+    """Stream the chat response."""
     async def generate():
         try:
             rag_chain = get_rag_chain()
             
-            # Exécuter la requête dans un thread pool
+            # Execute request in thread pool
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
@@ -83,7 +83,7 @@ async def chat_stream(
                 message.conversation_id
             )
             
-            # Stream la réponse mot par mot
+            # Stream response word by word
             words = result["answer"].split()
             for word in words:
                 chunk = {
@@ -92,7 +92,7 @@ async def chat_stream(
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
             
-            # Envoyer le chunk final avec les sources
+            # Send final chunk with sources
             final_chunk = {
                 "done": True,
                 "sources": result.get("sources", [])
@@ -111,11 +111,11 @@ async def clear_conversation_memory(
     conversation_id: str,
     api_key: str = Depends(verify_api_key)
 ):
-    """Efface la mémoire d'une conversation spécifique."""
+    """Clear memory of a specific conversation."""
     try:
         rag_chain = get_rag_chain()
         rag_chain.clear_memory(conversation_id)
-        return {"message": f"Mémoire effacée pour conversation: {conversation_id}"}
+        return {"message": f"Memory cleared for conversation: {conversation_id}"}
     except Exception as e:
-        logger.error(f"Erreur lors de l'effacement de la mémoire: {e}")
+        logger.error(f"Error clearing memory: {e}")
         raise HTTPException(status_code=500, detail=str(e))

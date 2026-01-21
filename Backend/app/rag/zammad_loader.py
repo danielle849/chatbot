@@ -19,14 +19,14 @@ class ZammadLoader:
         else:
             raise ValueError("Zammad client or configuration required")
     
-    def load_tickets(self, limit: int = 100) -> List[Dict]: # Récupère les tickets via l'API
+    def load_tickets(self, limit: int = 100) -> List[Dict]: # Retrieve tickets via API
         """Load tickets from Zammad and convert to document format."""
         documents = []
         
         try:
             tickets = self.client.get_tickets(limit=limit)
             
-            # Pour chaque ticket
+            # For each ticket
             for ticket in tickets:
                 try:
                     ticket_id = ticket.get('id')

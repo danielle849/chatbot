@@ -65,11 +65,11 @@ class VectorStore:
             raise
     
     def search(self, query_embedding: List[float], top_k: int = None, filter_dict: Optional[Dict] = None, score_threshold: Optional[float] = None) -> List[Dict]:
-        """Recherche des documents similaires avec seuil de score optionnel."""
+        """Search for similar documents with optional score threshold."""
         try:
             top_k = top_k or settings.top_k
             
-            # Construire le filtre si fourni
+            # Build filter if provided
             qdrant_filter = None
             if filter_dict:
                 conditions = []
@@ -80,7 +80,7 @@ class VectorStore:
                 if conditions:
                     qdrant_filter = Filter(must=conditions)
             
-            # Rechercher avec un top_k plus élevé si on veut filtrer par score
+            # Search with higher top_k if we want to filter by score
             search_limit = top_k
             if score_threshold is not None:
                 search_limit = max(top_k, settings.retrieval_fetch_k)
@@ -90,7 +90,7 @@ class VectorStore:
                 query_vector=query_embedding,
                 limit=search_limit,
                 query_filter=qdrant_filter,
-                score_threshold=score_threshold  # Seuil de score Qdrant
+                score_threshold=score_threshold  # Qdrant score threshold
             )
             
             documents = []
@@ -101,10 +101,10 @@ class VectorStore:
                     "metadata": {k: v for k, v in result.payload.items() if k != "text"}
                 })
             
-            # Limiter au top_k final si on a récupéré plus
+            # Limit to final top_k if we retrieved more
             return documents[:top_k]
         except Exception as e:
-            logger.error(f"Erreur lors de la recherche dans le vector store: {e}")
+            logger.error(f"Error searching in vector store: {e}")
             raise
     
     def delete_document(self, doc_id: str):

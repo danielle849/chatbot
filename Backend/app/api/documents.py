@@ -118,13 +118,13 @@ async def _ingest_zammad(
     embedding_generator: EmbeddingGenerator,
     processor: DocumentProcessor
 ) -> Dict:
-    """Ingest documents from Zammad.""" #verifie la configuration de Zammad
+    """Ingest documents from Zammad.""" # Verify Zammad configuration
     if not settings.zammad_base_url or not settings.zammad_api_token:
         raise HTTPException(
             status_code=400,
             detail="Zammad configuration missing. Set ZAMMAD_BASE_URL and ZAMMAD_API_TOKEN"
         )
-    # Charge les documents de Zammad/ creer le loader Zammad
+    # Load documents from Zammad / create Zammad loader
     zammad_loader = ZammadLoader()
     zammad_documents = []
     
@@ -133,7 +133,7 @@ async def _ingest_zammad(
     kb_entries_count = 0
     processing_errors = []
     
-    # Load tickets /charge les tickets (si activé)
+    # Load tickets (if enabled)
     if settings.zammad_sync_tickets:
         logger.info("Loading tickets from Zammad...")
         tickets = zammad_loader.load_tickets(limit=settings.zammad_ticket_limit)

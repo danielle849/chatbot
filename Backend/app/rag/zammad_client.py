@@ -39,7 +39,7 @@ class ZammadClient:
                 logger.error(f"Response status: {e.response.status_code}")
                 logger.error(f"Response headers: {dict(e.response.headers)}")
                 if hasattr(e.response, 'text'):
-                    logger.error(f"Response body: {e.response.text[:500]}")  # Limite à 500 caractères
+                    logger.error(f"Response body: {e.response.text[:500]}")  # Limit to 500 characters
             return None
     
     def _parse_response(self, result: Optional[Dict], key: str, default: List = None) -> List:

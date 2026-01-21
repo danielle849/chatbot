@@ -17,7 +17,7 @@ from app.utils.logger import logger
 
 
 def retry_on_failure(max_retries=3, delay=1.0):
-    """Decorator pour réessayer en cas d'échec."""
+    """Decorator to retry on failure."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -36,24 +36,24 @@ def retry_on_failure(max_retries=3, delay=1.0):
 
 
 class RAGChain:
-    """RAG chain optimisée utilisant LangChain, Qdrant, et Mistral."""
+    """Optimized RAG chain using LangChain, Qdrant, and Mistral."""
     
     def __init__(self, vector_store: VectorStore):
-        """Initialise la chaîne RAG avec le vector store."""
+        """Initialize the RAG chain with the vector store."""
         self.vector_store = vector_store
         self.llm = None
         self.embeddings = None
         self.retriever = None
         self.base_chain = None
         
-        # Gestion de la mémoire par conversation
+        # Per-conversation memory management
         self.memories = defaultdict(lambda: ConversationBufferWindowMemory(
             memory_key="chat_history",
             return_messages=True,
             output_key="answer",
-            k=settings.max_memory_length  # Garde les N derniers tours
+            k=settings.max_memory_length  # Keep the last N turns
         ))
-        self.memory_timestamps = {}  # Pour TTL
+        self.memory_timestamps = {}  # For TTL
         
         self._initialize_models()
     
@@ -67,7 +67,7 @@ class RAGChain:
                 model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"}
             )
             
-                        # Initialize LLM
+            # Initialize LLM
             logger.info(f"Loading LLM model: {settings.llm_model}")
             tokenizer = AutoTokenizer.from_pretrained(
                 settings.llm_model,
@@ -93,22 +93,6 @@ class RAGChain:
             
             self.llm = HuggingFacePipeline(pipeline=pipe)
             
-            model = AutoModelForCausalLM.from_pretrained(
-                settings.llm_model,
-                **model_kwargs
-            )
-            
-            pipe = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                max_new_tokens=settings.max_tokens,
-                temperature=settings.temperature,
-                return_full_text=False
-            )
-            
-            self.llm = HuggingFacePipeline(pipeline=pipe)
-            
             # Create retriever from vector store
             from langchain_community.vectorstores import Qdrant
             from langchain.schema import Document
@@ -116,48 +100,48 @@ class RAGChain:
             # Create a wrapper retriever
             self.retriever = QdrantRetrieverWrapper(self.vector_store, self.embeddings)
             
-            logger.info("Chaîne RAG initialisée avec succès")
+            logger.info("RAG chain initialized successfully")
             
         except Exception as e:
             logger.error(f"Error initializing RAG chain: {e}")
             raise
     
     def _get_or_create_chain(self, conversation_id: str):
-        """Obtient ou crée une chaîne avec mémoire pour une conversation spécifique."""
-        # Nettoyer les mémoires expirées
+        """Get or create a chain with memory for a specific conversation."""
+        # Clean up expired memories
         self._cleanup_expired_memories()
         
-        # Obtenir ou créer la mémoire pour cette conversation
+        # Get or create memory for this conversation
         memory = self.memories[conversation_id]
         self.memory_timestamps[conversation_id] = datetime.now()
         
-        # Template de prompt amélioré en allemand
-        prompt_template = """Du bist ein hilfreicher KI-Assistent für ein Unternehmen.
+        # Improved prompt template in English
+        prompt_template = """You are a helpful AI assistant for a company.
 
-AUFGABE: Beantworte Fragen präzise und hilfreich basierend auf dem bereitgestellten Kontext.
+TASK: Answer questions precisely and helpfully based on the provided context.
 
-KONTEXT:
+CONTEXT:
 {context}
 
-FRAGE: {question}
+QUESTION: {question}
 
-ANWEISUNGEN:
-- Wenn die Frage einen Fehler oder ein Problem betrifft:
-  1. Analysiere den Fehler systematisch
-  2. Erkläre die wahrscheinliche Ursache
-  3. Gib konkrete Lösungsschritte in nummerierter Form
+INSTRUCTIONS:
+- If the question concerns an error or problem:
+  1. Analyze the error systematically
+  2. Explain the likely cause
+  3. Provide concrete solution steps in numbered form
 
-- Wenn die Frage Prozesse oder Richtlinien betrifft:
-  1. Erkläre den Prozess Schritt für Schritt
-  2. Verweise auf relevante Dokumentation
-  3. Gib praktische Beispiele wenn möglich
+- If the question concerns processes or policies:
+  1. Explain the process step by step
+  2. Refer to relevant documentation
+  3. Provide practical examples when possible
 
-- Wenn die Antwort nicht im Kontext enthalten ist:
-  Sage ehrlich, dass die Information nicht verfügbar ist und gib wenn möglich allgemeine Hinweise.
+- If the answer is not contained in the context:
+  Honestly state that the information is not available and provide general guidance if possible.
 
-- Strukturiere deine Antwort klar und verwende Aufzählungen oder nummerierte Listen wenn angebracht.
+- Structure your answer clearly and use bullet points or numbered lists when appropriate.
 
-ANTWORT:"""
+ANSWER:"""
         
         PROMPT = PromptTemplate(
             template=prompt_template,
@@ -170,13 +154,13 @@ ANTWORT:"""
             memory=memory,
             combine_docs_chain_kwargs={"prompt": PROMPT},
             return_source_documents=True,
-            verbose=False  # Réduire le verbosity pour la production
+            verbose=False  # Reduce verbosity for production
         )
         
         return chain
     
     def _cleanup_expired_memories(self):
-        """Nettoie les mémoires expirées selon TTL."""
+        """Clean up expired memories according to TTL."""
         if not settings.enable_per_conversation_memory:
             return
             
@@ -187,7 +171,7 @@ ANTWORT:"""
         ]
         
         for conv_id in expired_conversations:
-            logger.info(f"Nettoyage de la mémoire expirée pour conversation: {conv_id}")
+            logger.info(f"Cleaning up expired memory for conversation: {conv_id}")
             if conv_id in self.memories:
                 self.memories[conv_id].clear()
                 del self.memories[conv_id]
@@ -196,16 +180,16 @@ ANTWORT:"""
     
     @retry_on_failure(max_retries=settings.max_retries, delay=settings.retry_delay)
     def query(self, question: str, conversation_id: Optional[str] = None) -> Dict:
-        """Interroge la chaîne RAG avec une question."""
+        """Query the RAG chain with a question."""
         try:
-            # Utiliser "default" si pas de conversation_id
+            # Use "default" if no conversation_id
             conv_id = conversation_id or "default"
             
-            # Obtenir ou créer la chaîne pour cette conversation
+            # Get or create chain for this conversation
             if settings.enable_per_conversation_memory:
                 chain = self._get_or_create_chain(conv_id)
             else:
-                # Fallback: utiliser une chaîne unique (comportement original)
+                # Fallback: use a single chain (original behavior)
                 if self.base_chain is None:
                     memory = ConversationBufferWindowMemory(
                         memory_key="chat_history",
@@ -213,11 +197,11 @@ ANTWORT:"""
                         output_key="answer",
                         k=settings.max_memory_length
                     )
-                    prompt_template = """Du bist ein hilfreicher KI-Assistent für ein Unternehmen.
+                    prompt_template = """You are a helpful AI assistant for a company.
 
-KONTEXT: {context}
-FRAGE: {question}
-ANTWORT:"""
+CONTEXT: {context}
+QUESTION: {question}
+ANSWER:"""
                     PROMPT = PromptTemplate(
                         template=prompt_template,
                         input_variables=["context", "question"]
@@ -234,7 +218,7 @@ ANTWORT:"""
             
             result = chain.invoke({"question": question})
             
-            # Extraire les sources avec scores
+            # Extract sources with scores
             sources = []
             source_scores = {}
             if "source_documents" in result:
@@ -242,33 +226,33 @@ ANTWORT:"""
                     if hasattr(doc, 'metadata'):
                         filename = doc.metadata.get("filename", "Unknown")
                         sources.append(filename)
-                        # Stocker le score si disponible
+                        # Store score if available
                         if hasattr(doc, 'metadata') and 'score' in doc.metadata:
                             source_scores[filename] = doc.metadata['score']
             
             return {
                 "answer": result.get("answer", ""),
                 "sources": list(set(sources)),
-                "source_scores": source_scores,  # Scores de similarité
+                "source_scores": source_scores,  # Similarity scores
                 "conversation_id": conv_id
             }
         except Exception as e:
-            logger.error(f"Erreur lors de l'interrogation de la chaîne RAG: {e}")
+            logger.error(f"Error querying the RAG chain: {e}")
             raise
     
     def clear_memory(self, conversation_id: Optional[str] = None):
-        """Efface la mémoire d'une conversation spécifique ou toutes."""
+        """Clear memory of a specific conversation or all."""
         if conversation_id:
             if conversation_id in self.memories:
                 self.memories[conversation_id].clear()
-                logger.info(f"Mémoire effacée pour conversation: {conversation_id}")
+                logger.info(f"Memory cleared for conversation: {conversation_id}")
         else:
-            # Effacer toutes les mémoires
+            # Clear all memories
             for memory in self.memories.values():
                 memory.clear()
             self.memories.clear()
             self.memory_timestamps.clear()
-            logger.info("Toutes les mémoires ont été effacées")
+            logger.info("All memories have been cleared")
 
 
 class QdrantRetrieverWrapper:
@@ -280,7 +264,7 @@ class QdrantRetrieverWrapper:
         self.embeddings = embeddings
     
     def get_relevant_documents(self, query: str) -> List:
-        """Récupère les documents pertinents pour une requête avec optimisation."""
+        """Retrieve relevant documents for a query with optimization."""
         try:
             from langchain_core.documents import Document
         except ImportError:
@@ -290,36 +274,36 @@ class QdrantRetrieverWrapper:
             except ImportError:
                 from langchain.documents import Document
         
-        # Générer l'embedding de la requête
+        # Generate query embedding
         query_embedding = self.embeddings.embed_query(query)
         
-        # Rechercher avec fetch_k pour avoir plus de candidats
+        # Search with fetch_k to get more candidates
         results = self.vector_store.search(
             query_embedding,
-            top_k=settings.retrieval_fetch_k  # Récupérer plus de candidats
+            top_k=settings.retrieval_fetch_k  # Retrieve more candidates
         )
         
-        # Filtrer par seuil de score
+        # Filter by score threshold
         filtered_results = [
             result for result in results
             if result.get("score", 0) >= settings.retrieval_score_threshold
         ]
         
-        # Limiter à top_k final
+        # Limit to final top_k
         filtered_results = filtered_results[:settings.top_k]
         
-        # Convertir en documents LangChain avec métadonnées enrichies
+        # Convert to LangChain documents with enriched metadata
         documents = []
         for result in filtered_results:
             metadata = result.get("metadata", {})
-            metadata["score"] = result.get("score", 0)  # Ajouter le score
+            metadata["score"] = result.get("score", 0)  # Add score
             doc = Document(
                 page_content=result["text"],
                 metadata=metadata
             )
             documents.append(doc)
         
-        logger.debug(f"Récupéré {len(documents)} documents (seuil: {settings.retrieval_score_threshold})")
+        logger.debug(f"Retrieved {len(documents)} documents (threshold: {settings.retrieval_score_threshold})")
         return documents
     
     def invoke(self, query: str, **kwargs) -> List:

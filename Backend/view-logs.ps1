@@ -1,29 +1,29 @@
-# Script PowerShell pour voir les logs du backend
+# PowerShell script to view backend logs
 
-Write-Host "=== LOGS DU BACKEND ===" -ForegroundColor Cyan
+Write-Host "=== BACKEND LOGS ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Vérifier si Docker est utilisé
+# Check if Docker is used
 $dockerRunning = docker ps --filter "name=rag_backend" --format "{{.Names}}" 2>$null
 
 if ($dockerRunning -eq "rag_backend") {
-    Write-Host "Docker détecté - Affichage des logs du conteneur..." -ForegroundColor Green
+    Write-Host "Docker detected - Displaying container logs..." -ForegroundColor Green
     Write-Host ""
     docker logs -f rag_backend
 } else {
-    # Vérifier si le fichier de log existe
+    # Check if log file exists
     $logFile = "logs\app.log"
     
     if (Test-Path $logFile) {
-        Write-Host "Fichier de log trouvé: $logFile" -ForegroundColor Green
+        Write-Host "Log file found: $logFile" -ForegroundColor Green
         Write-Host ""
-        Write-Host "=== DERNIÈRES 50 LIGNES ===" -ForegroundColor Yellow
+        Write-Host "=== LAST 50 LINES ===" -ForegroundColor Yellow
         Get-Content $logFile -Tail 50
         Write-Host ""
-        Write-Host "=== SUIVI EN TEMPS RÉEL (Ctrl+C pour arrêter) ===" -ForegroundColor Yellow
+        Write-Host "=== REAL-TIME FOLLOWING (Ctrl+C to stop) ===" -ForegroundColor Yellow
         Get-Content $logFile -Wait -Tail 20
     } else {
-        Write-Host "Fichier de log non trouvé: $logFile" -ForegroundColor Red
-        Write-Host "Le serveur backend doit être démarré pour générer des logs." -ForegroundColor Yellow
+        Write-Host "Log file not found: $logFile" -ForegroundColor Red
+        Write-Host "The backend server must be started to generate logs." -ForegroundColor Yellow
     }
 }

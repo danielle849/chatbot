@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     zammad_sync_kb: bool = True
     zammad_sync_attachments: bool = True
     zammad_ticket_limit: int = 100
-    zammad_kb_id: Optional[int] = 1  # ID de la Knowledge Base à synchroniser (par défaut 1)
+    zammad_kb_id: Optional[int] = 1  # Knowledge Base ID to sync (default 1)
     
     # LLM Parameters
     temperature: float = 0.7
