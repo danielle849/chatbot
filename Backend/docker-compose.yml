@@ -25,6 +25,7 @@ services:
       - ../data:/app/data
       - ./logs:/app/logs
       - ./app:/app/app
+       - huggingface_cache:/root/.cache/huggingface  # avoid restarting the container
     env_file:
       - .env.backend
     environment:
@@ -47,6 +48,7 @@ services:
 
 volumes:
   qdrant_storage:
+  huggingface_cache:  # Volume named for the HuggingFace cache
 
 networks:
   rag_network:
