@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open_webui
+    ports:
+      - "3000:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    env_file:
+      - .env.frontend
+    environment:
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - DEFAULT_USER_ROLE=user
+      - ENABLE_SIGNUP=false
+      - ENABLE_PERSISTENT_CONFIG=false
+      - ENABLE_LOGIN=true
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # Custom backend API configuration
+      - BACKEND_API_URL=http://backend:8000 # host.docker.internal:8000
+      - BACKEND_API_KEY=${API_KEY}
+    networks:
+      - rag_network
+    restart: unless-stopped
+
+volumes:
+  open_webui_data:
+
+networks:
+  rag_network:
+    external: true
+    name: backend_rag_network

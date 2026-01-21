@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - rag_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ./logs:/app/logs
+      - ./app:/app/app
+    env_file:
+      - .env.backend
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION_NAME=company_documents
+      - DOCUMENTS_FOLDER=/app/data
+      - HF_API_TOKEN=${HF_API_TOKEN}
+      - API_KEY=${API_KEY:-your-api-key-here}
+      - EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      - LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.2
+      - TEMPERATURE=0.7
+      - MAX_TOKENS=512
+      - TOP_K=4
+    depends_on:
+      - qdrant
+    networks:
+      - rag_network
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:
+
+networks:
+  rag_network:
+    name: backend_rag_network
+    driver: bridge
