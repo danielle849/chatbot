@@ -9,10 +9,15 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 try:
-    from pydantic import ConfigDict
+    from pydantic import ConfigDict, model_validator
     PYDANTIC_V2 = True
 except ImportError:
-    PYDANTIC_V2 = False
+    try:
+        from pydantic import model_validator
+        PYDANTIC_V2 = False
+    except ImportError:
+        PYDANTIC_V2 = False
+        model_validator = None
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from functools import wraps
@@ -274,6 +279,13 @@ class QdrantRetrieverWrapper(BaseRetriever):  # Hérite de BaseRetriever
     # Pour Pydantic v1
     class Config:
         arbitrary_types_allowed = True
+    
+    if model_validator:
+        @model_validator(mode='before')
+        @classmethod
+        def validate_model(cls, values):
+            """Ignore validation for non-serializable attributes."""
+            return values
     
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
