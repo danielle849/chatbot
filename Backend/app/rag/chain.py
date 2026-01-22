@@ -265,11 +265,15 @@ class QdrantRetrieverWrapper(BaseRetriever):  # Hérite de BaseRetriever
     """Wrapper to make Qdrant vector store compatible with LangChain retriever interface."""
     
     # Configuration Pydantic pour permettre les types arbitraires
-    if PYDANTIC_V2:
+    # Pour Pydantic v2
+    try:
         model_config = ConfigDict(arbitrary_types_allowed=True)
-    else:
-        class Config:
-            arbitrary_types_allowed = True
+    except:
+        pass
+    
+    # Pour Pydantic v1
+    class Config:
+        arbitrary_types_allowed = True
     
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
