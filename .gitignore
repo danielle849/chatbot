@@ -49,6 +49,9 @@ data/
 *.docx
 *.txt
 *.md
+# Allow requirements for Docker
+!Backend/requirements.txt
+
 
 # Models (if downloaded locally)
 models/

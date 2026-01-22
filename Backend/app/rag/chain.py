@@ -7,6 +7,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
+from langchain_core.retrievers import BaseRetriever
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from functools import wraps
@@ -260,10 +261,15 @@ class QdrantRetrieverWrapper:
     
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
+        super().__init__()  # Appel au constructeur parent pour que la classe soit compatible avec BaseRetriever
         self.vector_store = vector_store
         self.embeddings = embeddings
     
     def get_relevant_documents(self, query: str) -> List:
+        """Internal method required by BaseRetriever."""
+        return self.get_relevant_documents(query)
+
+    def _get_relevant_documents(self, query: str) -> List:
         """Retrieve relevant documents for a query with optimization."""
         try:
             from langchain_core.documents import Document
