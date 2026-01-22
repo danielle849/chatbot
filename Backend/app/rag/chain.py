@@ -256,19 +256,15 @@ ANSWER:"""
             logger.info("All memories have been cleared")
 
 
-class QdrantRetrieverWrapper:
+class QdrantRetrieverWrapper(BaseRetriever):  # Hérite de BaseRetriever
     """Wrapper to make Qdrant vector store compatible with LangChain retriever interface."""
     
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
-        super().__init__()  # Appel au constructeur parent pour que la classe soit compatible avec BaseRetriever
+        super().__init__()  # Appel au constructeur parent
         self.vector_store = vector_store
         self.embeddings = embeddings
     
-    def get_relevant_documents(self, query: str) -> List:
-        """Internal method required by BaseRetriever."""
-        return self.get_relevant_documents(query)
-
     def _get_relevant_documents(self, query: str) -> List:
         """Retrieve relevant documents for a query with optimization."""
         try:
@@ -312,10 +308,14 @@ class QdrantRetrieverWrapper:
         logger.debug(f"Retrieved {len(documents)} documents (threshold: {settings.retrieval_score_threshold})")
         return documents
     
+    def get_relevant_documents(self, query: str) -> List:
+        """Public method for LangChain compatibility."""
+        return self._get_relevant_documents(query)
+    
     def invoke(self, query: str, **kwargs) -> List:
         """Invoke method for LangChain compatibility."""
-        return self.get_relevant_documents(query)
+        return self._get_relevant_documents(query)
     
-    def get_relevant_documents_async(self, query: str) -> List:
+    async def aget_relevant_documents(self, query: str) -> List:
         """Async version for LangChain compatibility."""
-        return self.get_relevant_documents(query)
+        return self._get_relevant_documents(query)
