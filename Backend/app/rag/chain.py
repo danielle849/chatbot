@@ -8,6 +8,11 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
+try:
+    from pydantic import ConfigDict
+    PYDANTIC_V2 = True
+except ImportError:
+    PYDANTIC_V2 = False
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from functools import wraps
@@ -258,6 +263,13 @@ ANSWER:"""
 
 class QdrantRetrieverWrapper(BaseRetriever):  # Hérite de BaseRetriever
     """Wrapper to make Qdrant vector store compatible with LangChain retriever interface."""
+    
+    # Configuration Pydantic pour permettre les types arbitraires
+    if PYDANTIC_V2:
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+    else:
+        class Config:
+            arbitrary_types_allowed = True
     
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
