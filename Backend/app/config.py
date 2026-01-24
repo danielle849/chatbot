@@ -40,17 +40,17 @@ class Settings(BaseSettings):
     
     # LLM Parameters
     temperature: float = 0.7
-    max_tokens: int = 512
-    top_k: int = 4  # Number of documents to retrieve
+    max_tokens: int = 64 #512
+    top_k: int = 3 #4  # Number of documents to retrieve
 
     # Retrieval Optimization
     retrieval_score_threshold: float = 0.5  # Minimum similarity score (0.0-1.0)
-    retrieval_fetch_k: int = 20  # Fetch more candidates before filtering
+    retrieval_fetch_k: int = 10 #20  # Fetch more candidates before filtering
     use_mmr: bool = False  # Maximal Marginal Relevance for diversity
     mmr_diversity: float = 0.5  # MMR diversity parameter (0.0-1.0)
     
     # Memory Management
-    max_memory_length: int = 10  # Max conversation turns to keep in memory
+    max_memory_length: int = 2 #10  # Max conversation turns to keep in memory
     memory_ttl_hours: int = 24  # Memory expiration time in hours
     enable_per_conversation_memory: bool = True  # Separate memory per conversation_id
     

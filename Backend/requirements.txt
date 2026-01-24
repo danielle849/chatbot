@@ -4,10 +4,10 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 requests==2.31.0
-langchain
-#langchain-core==0.1.0
-langchain-community
-langchain-huggingface
+langchain==1.2.6
+langchain-core==1.2.7
+langchain-community==0.4.1
+langchain-huggingface==1.2.0
 qdrant-client==1.7.0
 #sentence-transformers==2.2.2
 unstructured[pdf,docx]==0.11.6

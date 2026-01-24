@@ -1,5 +1,5 @@
 """LangChain RAG chain implementation with optimizations."""
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from collections import defaultdict
 from datetime import datetime, timedelta
 from langchain_community.llms import HuggingFacePipeline
@@ -8,6 +8,8 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from pydantic import ConfigDict
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from functools import wraps
@@ -181,65 +183,57 @@ ANSWER:"""
 
     @retry_on_failure(max_retries=settings.max_retries, delay=settings.retry_delay)
     def query(self, question: str, conversation_id: Optional[str] = None) -> Dict:
-        """Query the RAG chain with a question."""
-        try:
-            # Use "default" if no conversation_id
-            conv_id = conversation_id or "default"
+        conv_id = conversation_id or "default"
 
-            # Get or create chain for this conversation
-            if settings.enable_per_conversation_memory:
-                chain = self._get_or_create_chain(conv_id)
-            else:
-                # Fallback: use a single chain (original behavior)
-                if self.base_chain is None:
-                    memory = ConversationBufferWindowMemory(
-                        memory_key="chat_history",
-                        return_messages=True,
-                        output_key="answer",
-                        k=settings.max_memory_length
-                    )
-                    prompt_template = """You are a helpful AI assistant for a company.
+        if settings.enable_per_conversation_memory:
+            chain = self._get_or_create_chain(conv_id)
+            result = chain.invoke({"question": question}) 
+        else:
+            if self.base_chain is None:
+                memory = ConversationBufferWindowMemory(
+                    memory_key="chat_history",
+                    return_messages=True,
+                    output_key="answer",
+                    k=settings.max_memory_length
+                )
+                prompt_template = """You are a helpful AI assistant for a company.
 
 CONTEXT: {context}
 QUESTION: {question}
 ANSWER:"""
-                    PROMPT = PromptTemplate(
-                        template=prompt_template,
-                        input_variables=["context", "question"]
-                    )
-                    self.base_chain = ConversationalRetrievalChain.from_llm(
-                        llm=self.llm,
-                        retriever=self.retriever,
-                        memory=memory,
-                        combine_docs_chain_kwargs={"prompt": PROMPT},
-                        return_source_documents=True,
-                        verbose=False
-                    )
-                chain = self.base_chain
+                PROMPT = PromptTemplate(
+                    template=prompt_template,
+                    input_variables=["context", "question"]
+                )
+                self.base_chain = ConversationalRetrievalChain.from_llm(
+                    llm=self.llm,
+                    retriever=self.retriever,
+                    memory=memory,
+                    combine_docs_chain_kwargs={"prompt": PROMPT},
+                    return_source_documents=True,
+                    verbose=False
+                )
 
-            result = chain.invoke({"question": question})
+            result = self.base_chain.invoke({"question": question}) 
 
-            # Extract sources with scores
-            sources = []
-            source_scores = {}
-            if "source_documents" in result:
-                for doc in result["source_documents"]:
-                    if hasattr(doc, 'metadata'):
-                        filename = doc.metadata.get("filename", "Unknown")
-                        sources.append(filename)
-                        # Store score if available
-                        if hasattr(doc, 'metadata') and 'score' in doc.metadata:
-                            source_scores[filename] = doc.metadata['score']
+        sources = []
+        source_scores = {}
 
-            return {
-                "answer": result.get("answer", ""),
-                "sources": list(set(sources)),
-                "source_scores": source_scores,  # Similarity scores
-                "conversation_id": conv_id
-            }
-        except Exception as e:
-            logger.error(f"Error querying the RAG chain: {e}")
-            raise
+        for doc in result.get("source_documents", []):
+            filename = doc.metadata.get("filename", "Unknown")
+            sources.append(filename)
+            if "score" in doc.metadata:
+                source_scores[filename] = doc.metadata["score"]
+
+        return {
+            "answer": result.get("answer", ""),
+            "sources": list(set(sources)),
+            "source_scores": source_scores,
+            "conversation_id": conv_id
+        }
+    #except Exception as e:
+    #logger.error(f"Error querying the RAG chain: {e}")
+    #raise
 
     def clear_memory(self, conversation_id: Optional[str] = None):
         """Clear memory of a specific conversation or all."""
@@ -258,64 +252,93 @@ ANSWER:"""
 
 class QdrantRetrieverWrapper(BaseRetriever):
     """Wrapper to make Qdrant vector store compatible with LangChain retriever interface."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    vector_store: Any
+    embeddings: Any
 
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
-        super().__init__()
-        self.vector_store = vector_store
-        self.embeddings = embeddings
+        super().__init__(vector_store = vector_store, embeddings = embeddings)
+      
 
-    def _get_relevant_documents(self, query: str) -> List:
+    def _get_relevant_documents(self, query: str) -> List[Document]:
         """Retrieve relevant documents for a query with optimization."""
-        try:
-            from langchain_core.documents import Document
-        except ImportError:
-            # Fallback for older LangChain versions
-            try:
-                from langchain.schema import Document
-            except ImportError:
-                from langchain.documents import Document
-
-        # Generate query embedding
         query_embedding = self.embeddings.embed_query(query)
 
-        # Search with fetch_k to get more candidates
         results = self.vector_store.search(
             query_embedding,
-            top_k=settings.retrieval_fetch_k  # Retrieve more candidates
+            top_k=settings.retrieval_fetch_k
         )
 
-        # Filter by score threshold
         filtered_results = [
-            result for result in results
-            if result.get("score", 0) >= settings.retrieval_score_threshold
-        ]
+            r for r in results
+            if r.get("score", 0) >= settings.retrieval_score_threshold
+        ][:settings.top_k]
+
+        docs: List[Document] = []
+        for r in filtered_results:
+            metadata = r.get("metadata", {})
+            metadata["score"] = r.get("score", 0)
+
+            docs.append(
+                Document(page_content=r["text"], metadata=metadata)
+            )
+        return docs
+
+        async def _aget_relevant_documents(self, query: str) -> List[Document]:
+        # simple fallback async
+         return self._get_relevant_documents(query)
+
+
+       # try:
+        #    from langchain_core.retrievers import Document
+       # except ImportError:
+            # Fallback for older LangChain versions
+        #    try:
+        #        from  langchain.schema import Document
+        #    except ImportError:
+        #        from langchain.documents import Document
+
+        # Generate query embedding
+       # query_embedding = self.embeddings.embed_query(query)
+
+        # Search with fetch_k to get more candidates
+        #results = self.vector_store.search(
+         #   query_embedding,
+         #   top_k=settings.retrieval_fetch_k  # Retrieve more candidates
+        #)
+
+        # Filter by score threshold
+        #filtered_results = [
+        #    result for result in results
+        #    if result.get("score", 0) >= settings.retrieval_score_threshold
+        #]
 
         # Limit to final top_k
-        filtered_results = filtered_results[:settings.top_k]
+        #filtered_results = filtered_results[:settings.top_k]
 
         # Convert to LangChain documents with enriched metadata
-        documents = []
-        for result in filtered_results:
-            metadata = result.get("metadata", {})
-            metadata["score"] = result.get("score", 0)  # Add score
-            doc = Document(
-                page_content=result["text"],
-                metadata=metadata
-            )
-            documents.append(doc)
+        #documents = []
+        #for result in filtered_results:
+        #    metadata = result.get("metadata", {})
+        #    metadata["score"] = result.get("score", 0)  # Add score
+        #    doc = Document(
+        #        page_content=result["text"],
+        #        metadata=metadata
+        #    )
+        #    documents.append(doc)
 
-        logger.debug(f"Retrieved {len(documents)} documents (threshold: {settings.retrieval_score_threshold})")
-        return documents
+        #logger.debug(f"Retrieved {len(documents)} documents (threshold: {settings.retrieval_score_threshold})")
+        #return documents
 
-    def get_relevant_documents(self, query: str) -> List:
-        """Public method required by BaseRetriever."""
-        return self._get_relevant_documents(query)
+   ## def get_relevant_documents(self, query: str) -> List:
+    ##    """Public method required by BaseRetriever."""
+     ##   return self._get_relevant_documents(query)
 
-    def invoke(self, query: str, **kwargs) -> List:
-        """Invoke method for LangChain compatibility."""
-        return self.get_relevant_documents(query)
+    #def invoke(self, query: str, **kwargs) -> List:
+    #    """Invoke method for LangChain compatibility."""
+    #    return self.get_relevant_documents(query)
 
-    async def aget_relevant_documents(self, query: str) -> List:
-        """Async version for LangChain compatibility."""
-        return self.get_relevant_documents(query)
+  ##  async def aget_relevant_documents(self, query: str) -> List:
+    #    """Async version for LangChain compatibility."""
+    #    return self.get_relevant_documents(query)
