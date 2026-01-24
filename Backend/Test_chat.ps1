@@ -1,6 +1,6 @@
 $headers = @{
     "Content-Type" = "application/json"
-    "X-API-Key" = "Q43Yz9Jio2ZBdNOPUR614drRhOmV3IICsaMu0O8eYGwUNusUbpBfbmz9jWyfNNwW"
+    "X-API-Key" = "your-api-key-here"
 
   }
   
