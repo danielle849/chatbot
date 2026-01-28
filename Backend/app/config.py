@@ -39,13 +39,13 @@ class Settings(BaseSettings):
     zammad_kb_id: Optional[int] = 1  # Knowledge Base ID to sync (default 1)
     
     # LLM Parameters
-    temperature: float = 0.7
-    max_tokens: int = 64 #512
-    top_k: int = 3 #4  # Number of documents to retrieve
+    temperature: float = 0.0
+    max_tokens: int = 128 #512
+    top_k: int = 6 #3  # Number of documents to retrieve
 
     # Retrieval Optimization
-    retrieval_score_threshold: float = 0.5  # Minimum similarity score (0.0-1.0)
-    retrieval_fetch_k: int = 10 #20  # Fetch more candidates before filtering
+    retrieval_score_threshold: float = 0.1  # Minimum similarity score (0.0-1.0)
+    retrieval_fetch_k: int = 30 #10  # Fetch more candidates before filtering
     use_mmr: bool = False  # Maximal Marginal Relevance for diversity
     mmr_diversity: float = 0.5  # MMR diversity parameter (0.0-1.0)
     

@@ -4,19 +4,21 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from langchain_community.llms import HuggingFacePipeline
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains import RetrievalQAWithSourcesChain
+#from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
+from langchain.callbacks.manager import CallbackManagerForRetrieverRun
 from pydantic import ConfigDict
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from functools import wraps
+from app.utils.logger import logger
 import time
 from app.config import settings
 from app.rag.vector_store import VectorStore
-from app.utils.logger import logger
 
 
 def retry_on_failure(max_retries=3, delay=1.0):
@@ -118,44 +120,47 @@ class RAGChain:
         memory = self.memories[conversation_id]
         self.memory_timestamps[conversation_id] = datetime.now()
 
-        # Improved prompt template in English
-        prompt_template = """You are a helpful AI assistant for a company.
+        # Improved prompt template in German
+        prompt_template = """Du bist ein interner KI-Assistent für ein Unternehmen.
 
-TASK: Answer questions precisely and helpfully based on the provided context.
-
-CONTEXT:
+KONTEXT:
 {context}
 
-QUESTION: {question}
+FRAGE:
+{question}
 
-INSTRUCTIONS:
-- If the question concerns an error or problem:
-  1. Analyze the error systematically
-  2. Explain the likely cause
-  3. Provide concrete solution steps in numbered form
+REGELN (SEHR WICHTIG):
+- Beantworte die Frage AUSSCHLIESSLICH mit Informationen aus dem KONTEXT.
+- Verwende KEIN externes Wissen, KEINE Annahmen, KEINE Vermutungen, KEINE zusätzlichen FAQs..
+- Wenn die Antwort im Kontext enthalten ist:
+  - Gib eine kurze, präzise Antwort.
+  - ZITIERE anschließend die exakte Textstelle aus dem Kontext, die die Antwort belegt.
+- Wenn die Antwort NICHT im Kontext enthalten ist:
+  - Antworte exakt mit: "Nicht im Kontext gefunden."
+- Antworte NUR auf Deutsch.
+- Erfinde keine Informationen.
 
-- If the question concerns processes or policies:
-  1. Explain the process step by step
-  2. Refer to relevant documentation
-  3. Provide practical examples when possible
+ANTWORTFORMAT:
+Antwort: <kurze Antwort>
+Beleg: "<exaktes Zitat aus dem Kontext>"
 
-- If the answer is not contained in the context:
-  Honestly state that the information is not available and provide general guidance if possible.
+ANTWORT:(auf Deutsch)
+"""
 
-- Structure your answer clearly and use bullet points or numbered lists when appropriate.
-
-ANSWER:"""
 
         PROMPT = PromptTemplate(
             template=prompt_template,
             input_variables=["context", "question"]
         )
 
-        chain = ConversationalRetrievalChain.from_llm(
+        chain = RetrievalQAWithSourcesChain.from_chain_type(
             llm=self.llm,
+            chain_type="stuff",
             retriever=self.retriever,
-            memory=memory,
-            combine_docs_chain_kwargs={"prompt": PROMPT},
+            #memory=memory,
+            chain_type_kwargs={"prompt": PROMPT,
+                               "document_variable_name": "context",
+            },
             return_source_documents=True,
             verbose=False  # Reduce verbosity for production
         )
@@ -185,49 +190,79 @@ ANSWER:"""
     def query(self, question: str, conversation_id: Optional[str] = None) -> Dict:
         conv_id = conversation_id or "default"
 
-        if settings.enable_per_conversation_memory:
-            chain = self._get_or_create_chain(conv_id)
-            result = chain.invoke({"question": question}) 
-        else:
-            if self.base_chain is None:
-                memory = ConversationBufferWindowMemory(
-                    memory_key="chat_history",
-                    return_messages=True,
-                    output_key="answer",
-                    k=settings.max_memory_length
-                )
-                prompt_template = """You are a helpful AI assistant for a company.
+        if self.base_chain is None:
+        #if settings.enable_per_conversation_memory:
+           # chain = self._get_or_create_chain(conv_id)
+            #if chain is None:
+             #   raise RuntimeError("_get_or_create_chain returned None")
+            #result = chain.invoke({"question": question})
 
-CONTEXT: {context}
-QUESTION: {question}
-ANSWER:"""
-                PROMPT = PromptTemplate(
-                    template=prompt_template,
-                    input_variables=["context", "question"]
-                )
-                self.base_chain = ConversationalRetrievalChain.from_llm(
-                    llm=self.llm,
-                    retriever=self.retriever,
-                    memory=memory,
-                    combine_docs_chain_kwargs={"prompt": PROMPT},
-                    return_source_documents=True,
-                    verbose=False
-                )
 
-            result = self.base_chain.invoke({"question": question}) 
+        #try:
+         #   memory = self.memories[conv_id]
+          #  memory.save_context({"question": question}, {"answer": result.get("answer", "")})
+        #except Exception as e:
+         #   logger.warning(f"Memory save failed for conversation {conv_id}: {e}")
+
+            prompt_template =  """Du bist ein hilfreicher KI-Assistent für ein Unternehmen.
+
+KONTEXT: {context}
+FRAGE: {question}
+ANTWORT:"""
+            PROMPT = PromptTemplate(
+                 template=prompt_template,
+                 input_variables=["context", "question"]
+            )
+            self.base_chain = RetrievalQAWithSourcesChain.from_chain_type(
+                llm=self.llm,
+                chain_type="stuff",
+                retriever=self.retriever,
+                return_source_documents=True,
+                chain_type_kwargs={"prompt": PROMPT,
+                                   "document_variable_name": "context",
+                },
+                verbose=False,
+            )
+
+        result = self.base_chain.invoke({"question": question})
 
         sources = []
         source_scores = {}
 
-        for doc in result.get("source_documents", []):
-            filename = doc.metadata.get("filename", "Unknown")
-            sources.append(filename)
-            if "score" in doc.metadata:
-                source_scores[filename] = doc.metadata["score"]
+        for doc in result.get("source_documents", []) or []:
+            meta = doc.metadata or {}
+            title = meta.get("title")
+            filename = meta.get("filename", "Unknown")
+            chunk_index = meta.get("chunk_index")
+            score = meta.get("score")
+
+            parts = []
+            if title:
+                parts.append(title)
+            parts.append(filename)
+            if chunk_index is not None:
+                parts.append(f"Chunk {chunk_index}")
+
+            label = " | ".join(label_parts)
+
+            sources.append(label)
+
+            if score is not None:
+                try:
+                    source_scores[label] = round(float(score), 4)
+
+                except Exception:
+                    pass
+        try:
+            memory = self.memories[conv_id]
+            self.memory_timestamps[conv_id] = datetime.now()
+            memory.save_context({"question": question}, {"answer": answer})
+        except Exception as e:
+            logger.warning(f"Memory save failed for conversation {conv_id}: {e}")
 
         return {
             "answer": result.get("answer", ""),
-            "sources": list(set(sources)),
+            "sources": list(dict.fromkeys(sources)),
             "source_scores": source_scores,
             "conversation_id": conv_id
         }
@@ -259,86 +294,29 @@ class QdrantRetrieverWrapper(BaseRetriever):
     def __init__(self, vector_store: VectorStore, embeddings):
         """Initialize retriever wrapper."""
         super().__init__(vector_store = vector_store, embeddings = embeddings)
-      
 
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        """Retrieve relevant documents for a query with optimization."""
+
+    def _get_relevant_documents(self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None) -> List[Document]:
         query_embedding = self.embeddings.embed_query(query)
 
         results = self.vector_store.search(
-            query_embedding,
-            top_k=settings.retrieval_fetch_k
+            query_embedding=query_embedding,
+            top_k=settings.retrieval_fetch_k,
+            score_threshold=settings.retrieval_score_threshold ,
         )
-
-        filtered_results = [
-            r for r in results
-            if r.get("score", 0) >= settings.retrieval_score_threshold
-        ][:settings.top_k]
+        results = results[:settings.top_k]
+        logger.info("Top scores: %s", [round(r["score"], 3) for r in results[:5]])
 
         docs: List[Document] = []
-        for r in filtered_results:
+        for r in results:
             metadata = r.get("metadata", {})
             metadata["score"] = r.get("score", 0)
+            text = (r.get("text") or "")[:2000]
+            docs.append(Document(page_content=text, metadata=metadata))
 
-            docs.append(
-                Document(page_content=r["text"], metadata=metadata)
-            )
         return docs
 
-        async def _aget_relevant_documents(self, query: str) -> List[Document]:
+    async def _aget_relevant_documents(self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None) -> List[Document]:
         # simple fallback async
          return self._get_relevant_documents(query)
 
-
-       # try:
-        #    from langchain_core.retrievers import Document
-       # except ImportError:
-            # Fallback for older LangChain versions
-        #    try:
-        #        from  langchain.schema import Document
-        #    except ImportError:
-        #        from langchain.documents import Document
-
-        # Generate query embedding
-       # query_embedding = self.embeddings.embed_query(query)
-
-        # Search with fetch_k to get more candidates
-        #results = self.vector_store.search(
-         #   query_embedding,
-         #   top_k=settings.retrieval_fetch_k  # Retrieve more candidates
-        #)
-
-        # Filter by score threshold
-        #filtered_results = [
-        #    result for result in results
-        #    if result.get("score", 0) >= settings.retrieval_score_threshold
-        #]
-
-        # Limit to final top_k
-        #filtered_results = filtered_results[:settings.top_k]
-
-        # Convert to LangChain documents with enriched metadata
-        #documents = []
-        #for result in filtered_results:
-        #    metadata = result.get("metadata", {})
-        #    metadata["score"] = result.get("score", 0)  # Add score
-        #    doc = Document(
-        #        page_content=result["text"],
-        #        metadata=metadata
-        #    )
-        #    documents.append(doc)
-
-        #logger.debug(f"Retrieved {len(documents)} documents (threshold: {settings.retrieval_score_threshold})")
-        #return documents
-
-   ## def get_relevant_documents(self, query: str) -> List:
-    ##    """Public method required by BaseRetriever."""
-     ##   return self._get_relevant_documents(query)
-
-    #def invoke(self, query: str, **kwargs) -> List:
-    #    """Invoke method for LangChain compatibility."""
-    #    return self.get_relevant_documents(query)
-
-  ##  async def aget_relevant_documents(self, query: str) -> List:
-    #    """Async version for LangChain compatibility."""
-    #    return self.get_relevant_documents(query)

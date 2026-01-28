@@ -3,7 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import chat, documents, health
+#from app.api.chat import router as chat_router
 from app.utils.logger import logger
+from app.api.openai_compat import router as openai_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -26,7 +28,7 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(health.router)
-
+app.include_router(openai_router)
 
 @app.on_event("startup")
 async def startup_event():

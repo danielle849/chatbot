@@ -62,8 +62,8 @@ async def chat(
             sources=result.get("sources", [])
         )
     except Exception as e:
-        logger.error(f"Error processing chat message: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+        logger.Exception(f"Error processing chat message")
+        raise HTTPException(status_code=500, detail=f"Error processing message: {type(e).__name__}: {e!r}")
 
 
 @router.post("/stream")
@@ -78,6 +78,7 @@ async def chat_stream(
             
             # Execute request in thread pool
             loop = asyncio.get_event_loop()
+            yield f"data: {json.dumps({'content':'(Suche in Datenbank…) '})}\n\n"
             result = await loop.run_in_executor(
                 None,
                 rag_chain.query,
@@ -102,7 +103,8 @@ async def chat_stream(
             yield f"data: {json.dumps(final_chunk)}\n\n"
             
         except Exception as e:
-            error_chunk = {"error": str(e)}
+            logger.exception("Error processing chat stream")  # <-- stacktrace complet
+            error_chunk = {"error": f"{type(e).__name__}: {e!r}"}
             yield f"data: {json.dumps(error_chunk)}\n\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")
