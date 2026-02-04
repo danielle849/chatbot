@@ -39,8 +39,8 @@ class Settings(BaseSettings):
     zammad_kb_id: Optional[int] = 1  # Knowledge Base ID to sync (default 1)
     
     # LLM Parameters
-    temperature: float = 0.0
-    max_tokens: int = 128 #512
+    temperature: float = 0.7
+    max_tokens: int = 512 #128
     top_k: int = 6 #3  # Number of documents to retrieve
 
     # Retrieval Optimization

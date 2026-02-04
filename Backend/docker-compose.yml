@@ -40,7 +40,7 @@ services:
       - QDRANT_PORT=6333
       - QDRANT_COLLECTION_NAME=company_documents
       - DOCUMENTS_FOLDER=/app/data
-      - API_KEY=${API_KEY:-your-api-key-here}
+#      - API_KEY=${API_KEY:-your-api-key-here}
       - EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
       - LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.2
       - TEMPERATURE=0.7

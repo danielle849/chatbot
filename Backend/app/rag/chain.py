@@ -191,24 +191,33 @@ ANTWORT:(auf Deutsch)
         conv_id = conversation_id or "default"
 
         if self.base_chain is None:
-        #if settings.enable_per_conversation_memory:
-           # chain = self._get_or_create_chain(conv_id)
-            #if chain is None:
-             #   raise RuntimeError("_get_or_create_chain returned None")
-            #result = chain.invoke({"question": question})
-
-
-        #try:
-         #   memory = self.memories[conv_id]
-          #  memory.save_context({"question": question}, {"answer": result.get("answer", "")})
-        #except Exception as e:
-         #   logger.warning(f"Memory save failed for conversation {conv_id}: {e}")
 
             prompt_template =  """Du bist ein hilfreicher KI-Assistent für ein Unternehmen.
 
+
+WICHTIGE REGELN:
+1. PRIORITÄT: Verwende zuerst die Informationen aus dem KONTEXT (Wissensdatenbank)
+2. Wenn der KONTEXT relevante Informationen enthält, beantworte die Frage basierend darauf
+3. Wenn der KONTEXT leer ist oder keine relevanten Informationen enthält, nutze dein Allgemeinwissen
+4. Antworte IMMER auf Deutsch, auch wenn der KONTEXT auf Englisch ist
+
+VERBOTEN:
+- Kopiere NIEMALS die Formatierung "FRAGE:" oder "ANTWORT:" aus dem Kontext
+- Kopiere NIEMALS Q&A-Paare aus dem Kontext
+- Verwende KEINE Formatierung mit "FRAGE:" und "ANTWORT:" in deiner Antwort
+- Antworte NICHT mit mehreren Fragen und Antworten
+
+ERLAUBT:
+- Extrahiere NUR die relevanten Informationen aus dem Kontext
+- Formuliere die Antwort in deinen eigenen Worten
+- Antworte direkt und natürlich auf die gestellte Frage
+- Verwende einen fließenden, natürlichen Text
+
+
 KONTEXT: {context}
 FRAGE: {question}
-ANTWORT:"""
+ANTWORT(auf Deutsch):"""
+
             PROMPT = PromptTemplate(
                  template=prompt_template,
                  input_variables=["context", "question"]
@@ -228,22 +237,27 @@ ANTWORT:"""
 
         sources = []
         source_scores = {}
+        min_source_score = 0.4
 
         for doc in result.get("source_documents", []) or []:
             meta = doc.metadata or {}
             title = meta.get("title")
             filename = meta.get("filename", "Unknown")
-            chunk_index = meta.get("chunk_index")
-            score = meta.get("score")
+            #chunk_index = meta.get("chunk_index")
+            score = meta.get("score", 0.0)
+
+            # Only include sources with good similarity scores
+            if score is None or score < min_source_score:
+                continue
 
             parts = []
             if title:
                 parts.append(title)
             parts.append(filename)
-            if chunk_index is not None:
-                parts.append(f"Chunk {chunk_index}")
+            #if chunk_index is not None:
+             #   parts.append(f"Chunk {chunk_index}")
 
-            label = " | ".join(label_parts)
+            label = " | ".join(parts)
 
             sources.append(label)
 
@@ -256,7 +270,7 @@ ANTWORT:"""
         try:
             memory = self.memories[conv_id]
             self.memory_timestamps[conv_id] = datetime.now()
-            memory.save_context({"question": question}, {"answer": answer})
+            memory.save_context({"question": question}, {"answer": result.get("answer", "")})
         except Exception as e:
             logger.warning(f"Memory save failed for conversation {conv_id}: {e}")
 

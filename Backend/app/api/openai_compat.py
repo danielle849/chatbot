@@ -114,7 +114,7 @@ async def chat_completions(
 
         async def sse_gen():
             try:
-                # Initial empty chunk
+                # Initial loading message
                 first = OpenAIChatCompletionsChunk(
                     id=completion_id,
                     created=created,
@@ -134,6 +134,8 @@ async def chat_completions(
                     conversation_id,
                 )
                 answer = result["answer"]
+                sources = result.get("sources", [])
+
 
                 # Stream word by word
                 for word in answer.split():
@@ -149,6 +151,28 @@ async def chat_completions(
                             )],
                     )
                     yield f"data: {chunk.model_dump_json()}\n\n"
+
+
+                # Add sources if available
+                if sources:
+                    sources_separator = "\n\n---\n\n"
+                    sources_header = "**Quellen:**\n"
+                    sources_list = "\n".join([f"- *{source}*" for source in sources])
+                    sources_text = sources_separator + sources_header + sources_list
+
+                    for char in sources_text:
+                        chunk = OpenAIChatCompletionsChunk(
+                            id=completion_id,
+                            created=created,
+                            model=payload.model,
+                            choices=[
+                                OpenAIChatChunkChoice(
+                                    index=0,
+                                    delta=OpenAIChatDelta(content=char),
+                                    finish_reason=None,
+                                )],
+                        )
+                        yield f"data: {chunk.model_dump_json()}\n\n"
 
                 # Final chunk
                 last = OpenAIChatCompletionsChunk(
@@ -187,7 +211,7 @@ async def chat_completions(
         answer = result["answer"]
 
         if sources:
-            answer += "\n\nSources:\n- " + "\n- ".join(sources)
+            answer += "\n\n---\n\n**Quellen:**\n" + "\n".join([f"- *{source}*" for source in sources])
 
         response = OpenAIChatCompletionsResponse(
             id=completion_id,
