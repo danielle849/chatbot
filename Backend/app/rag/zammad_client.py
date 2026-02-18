@@ -187,8 +187,19 @@ class ZammadClient:
                         logger.warning(f"[{i}/{len(answer_ids)}] Failed to fetch answer {answer_id}")
                         continue
                     
-                    # Extract body HTML recursively
-                    body_html = self._find_body_recursive(answer_result)
+                    # Zammad API wraps data in "assets"; support both structures for all answers
+                    assets = answer_result.get("assets") or {}
+                    answer_key = str(answer_id)
+                    
+                    # Body: prefer explicit path (works for any answer_id), fallback to recursive
+                    content_by_id = (assets.get("KnowledgeBaseAnswerTranslationContent") or {})
+                    body_html = None
+                    if isinstance(content_by_id, dict):
+                        content = content_by_id.get(answer_key)
+                        if isinstance(content, dict) and content.get("body"):
+                            body_html = content["body"]
+                    if not body_html:
+                        body_html = self._find_body_recursive(answer_result)
                     if not body_html:
                         logger.warning(f"[{i}/{len(answer_ids)}] No body found for answer {answer_id}")
                         continue
@@ -196,27 +207,34 @@ class ZammadClient:
                     # Convert HTML to text
                     body_text = self._html_to_text(body_html)
                     
-                    # Extract title from KnowledgeBaseAnswerTranslation
-                    title = f"KB Entry #{answer_id}"  # Default title
-                    kb_translations = answer_result.get("KnowledgeBaseAnswerTranslation") or {}
-                    if isinstance(kb_translations, dict) and kb_translations:
-                        # Get first translation's title
-                        first_translation = next(iter(kb_translations.values()))
-                        if isinstance(first_translation, dict):
-                            extracted_title = first_translation.get("title")
-                            if extracted_title:
-                                title = extracted_title
+                    # Title: from assets.KnowledgeBaseAnswerTranslation[answer_id] (works for all IDs)
+                    title = f"KB Entry #{answer_id}"
+                    translations = assets.get("KnowledgeBaseAnswerTranslation") or {}
+                    if isinstance(translations, dict):
+                        trans = translations.get(answer_key)
+                        if isinstance(trans, dict) and trans.get("title"):
+                            title = trans["title"]
+                    
+                    # category_id, created_at, updated_at from assets.KnowledgeBaseAnswer[answer_id]
+                    kb_answer = (assets.get("KnowledgeBaseAnswer") or {}).get(answer_key)
+                    created_at = answer_result.get("created_at")
+                    updated_at = answer_result.get("updated_at")
+                    category_id = None
+                    if isinstance(kb_answer, dict):
+                        created_at = created_at or kb_answer.get("created_at")
+                        updated_at = updated_at or kb_answer.get("updated_at")
+                        category_id = kb_answer.get("category_id")
                     
                     # Build entry compatible with zammad_loader expectations
                     entry = {
-                        'id': answer_id,  # For compatibility with loader
-                        'answer_id': answer_id,  # Keep original ID
+                        'id': answer_id,
+                        'answer_id': answer_id,
                         'title': title,
-                        'body': body_text,  # Text content (not HTML)
+                        'body': body_text,
                         'knowledge_base_id': kb_id,
-                        # Include other metadata if available
-                        'created_at': answer_result.get('created_at'),
-                        'updated_at': answer_result.get('updated_at'),
+                        'category_id': category_id,
+                        'created_at': created_at,
+                        'updated_at': updated_at,
                     }
                     
                     entries.append(entry)

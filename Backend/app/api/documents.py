@@ -124,6 +124,11 @@ async def _ingest_zammad(
             status_code=400,
             detail="Zammad configuration missing. Set ZAMMAD_BASE_URL and ZAMMAD_API_TOKEN"
         )
+    
+    # Remove old Zammad data before re-sync (tickets + KB) so we replace, not append
+    vector_store.delete_documents_by_source(["zammad_ticket", "zammad_kb"])
+    logger.info("Cleared existing Zammad data for fresh sync")
+    
     # Load documents from Zammad / create Zammad loader
     zammad_loader = ZammadLoader()
     zammad_documents = []

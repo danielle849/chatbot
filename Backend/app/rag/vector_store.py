@@ -1,7 +1,7 @@
 """Vector store integration with Qdrant."""
 from typing import List, Dict, Optional
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, MatchAny, FilterSelector
 from app.config import settings
 from app.utils.logger import logger
 
@@ -107,6 +107,28 @@ class VectorStore:
             logger.error(f"Error searching in vector store: {e}")
             raise
     
+    def delete_documents_by_source(self, sources: List[str]) -> int:
+        """Delete all points with given source(s). Returns approx. count of deleted points."""
+        if not sources:
+            return 0
+        try:
+            if len(sources) == 1:
+                condition = FieldCondition(key="source", match=MatchValue(value=sources[0]))
+            else:
+                condition = FieldCondition(key="source", match=MatchAny(any=sources))
+            
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=FilterSelector(
+                    filter=Filter(must=[condition])
+                )
+            )
+            logger.info(f"Deleted points with source in: {sources}")
+            return 1
+        except Exception as e:
+            logger.error(f"Error deleting by source {sources}: {e}")
+            return 0
+
     def delete_document(self, doc_id: str):
         """Delete all chunks of a document."""
         try:
