@@ -449,8 +449,10 @@ async def search_documents(
             formatted_results.append({
                 "rank": i,
                 "score": result.get("score", 0.0),
-                "text": result.get("text", "")[:200] + "..." if len(result.get("text", "")) > 200 else result.get("text", ""),
+                "text": result.get("text", "")[:300] + "..." if len(result.get("text", "")) > 300 else result.get("text", ""),
                 "filename": metadata.get("filename", "Unknown"),
+                "title": metadata.get("title"),  # KB-Eintrag-Titel für Zammad
+                "kb_entry_id": metadata.get("kb_entry_id"),
                 "doc_id": metadata.get("doc_id", "Unknown"),
                 "chunk_index": metadata.get("chunk_index", None)
             })
