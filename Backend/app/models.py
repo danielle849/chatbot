@@ -8,6 +8,7 @@ class ChatMessage(BaseModel):
     """Chat message model."""
     message: str = Field(..., min_length=1, max_length=10000, description="User message (max 10000 characters)")
     conversation_id: Optional[str] = Field(None, max_length=100, description="Optional conversation ID")
+    category_id: Optional[int] = Field(None, description="Zammad category_id (z.B. 43 für WordPress) - limitiert Suche auf diese Kategorie")
 
 
 class ChatResponse(BaseModel):

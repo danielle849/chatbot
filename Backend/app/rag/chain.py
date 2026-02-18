@@ -1,6 +1,7 @@
 """LangChain RAG chain implementation with optimizations."""
 from typing import List, Dict, Optional, Any
 from collections import defaultdict
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from langchain_community.llms import HuggingFacePipeline
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -11,6 +12,7 @@ from langchain.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from langchain.callbacks.manager import CallbackManagerForRetrieverRun
+from langchain_core.messages import HumanMessage
 from pydantic import ConfigDict
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
@@ -19,6 +21,38 @@ from app.utils.logger import logger
 import time
 from app.config import settings
 from app.rag.vector_store import VectorStore
+
+# Context variable for per-request retrieval filter (e.g. category_id)
+retrieval_filter_ctx: ContextVar[Optional[Dict]] = ContextVar("retrieval_filter", default=None)
+
+
+def _build_search_query(question: str, chat_history: List[Any]) -> str:
+    """Build a more concrete search query from chat history + current question.
+    
+    Generic follow-ups like 'was bedeutet das?' or 'und dazu?' need the prior context
+    to retrieve relevant documents. Concatenates the last substantial user question
+    with the current one for better embedding search.
+    """
+    if not question or not question.strip():
+        return question
+    q = question.strip()
+    # Generic/short questions that benefit from context
+    generic_patterns = (
+        len(q) < 25 and any(
+            phrase in q.lower() for phrase in
+            ("was bedeutet", "und das", "dazu", "genauer", "erklär", "im dokument", "darüber")
+        )
+    )
+    if not generic_patterns:
+        return q
+    # Find last substantial user message from history
+    for msg in reversed(chat_history):
+        if isinstance(msg, HumanMessage):
+            content = getattr(msg, "content", None) or ""
+            if isinstance(content, str) and len(content.strip()) > 15:
+                prev = content.strip()
+                return f"{prev}\n{q}"
+    return q
 
 
 def retry_on_failure(max_retries=3, delay=1.0):
@@ -187,32 +221,44 @@ ANTWORT:(auf Deutsch)
                 del self.memory_timestamps[conv_id]
 
     @retry_on_failure(max_retries=settings.max_retries, delay=settings.retry_delay)
-    def query(self, question: str, conversation_id: Optional[str] = None) -> Dict:
+    def query(self, question: str, conversation_id: Optional[str] = None, category_id: Optional[int] = None) -> Dict:
         conv_id = conversation_id or "default"
+
+        # Set retrieval filter for this request (category scope)
+        retrieval_filter_ctx.set({"category_id": category_id} if category_id is not None else None)
+
+        # Query rewriting: use chat history for concrete retrieval when question is generic
+        chat_history: List[Any] = []
+        if settings.enable_per_conversation_memory and conv_id in self.memories:
+            try:
+                mem_vars = self.memories[conv_id].load_memory_variables({})
+                chat_history = mem_vars.get("chat_history") or []
+            except Exception:
+                chat_history = []
+        search_query = _build_search_query(question, chat_history)
+        if search_query != question:
+            logger.info("Query rewritten for retrieval: %r -> %r", question[:50], search_query[:80])
 
         if self.base_chain is None:
 
             prompt_template =  """Du bist ein hilfreicher KI-Assistent für ein Unternehmen.
 
-
 WICHTIGE REGELN:
-1. PRIORITÄT: Verwende zuerst die Informationen aus dem KONTEXT (Wissensdatenbank)
-2. Wenn der KONTEXT relevante Informationen enthält, beantworte die Frage basierend darauf
-3. Wenn der KONTEXT leer ist oder keine relevanten Informationen enthält, nutze dein Allgemeinwissen
-4. Antworte IMMER auf Deutsch, auch wenn der KONTEXT auf Englisch ist
+1. Beantworte NUR, wenn mindestens eine Quelle im KONTEXT DIREKT die gestellte Frage beantwortet.
+2. Wenn der KONTEXT zwar Texte enthält, aber KEINER davon zur Frage passt: Antworte mit "Dazu finde ich nichts Relevantes in der Wissensdatenbank."
+3. Antworte IMMER auf Deutsch.
+4. Zitiere nur Chunks, die du tatsächlich genutzt hast – nicht die gesamte Quellenliste.
 
 VERBOTEN:
 - Kopiere NIEMALS die Formatierung "FRAGE:" oder "ANTWORT:" aus dem Kontext
-- Kopiere NIEMALS Q&A-Paare aus dem Kontext
+- Kopiere NIEMALS Q&A-Paare oder mehrere Themen aus dem Kontext
 - Verwende KEINE Formatierung mit "FRAGE:" und "ANTWORT:" in deiner Antwort
-- Antworte NICHT mit mehreren Fragen und Antworten
+- Gib keine E-Mail-Adressen, Passwörter oder API-Keys aus dem Kontext wieder
 
 ERLAUBT:
-- Extrahiere NUR die relevanten Informationen aus dem Kontext
+- Extrahiere NUR die relevanten Informationen, die die Frage direkt beantworten
 - Formuliere die Antwort in deinen eigenen Worten
-- Antworte direkt und natürlich auf die gestellte Frage
-- Verwende einen fließenden, natürlichen Text
-
+- Fließender, natürlicher Text
 
 KONTEXT: {context}
 FRAGE: {question}
@@ -233,7 +279,7 @@ ANTWORT(auf Deutsch):"""
                 verbose=False,
             )
 
-        result = self.base_chain.invoke({"question": question})
+        result = self.base_chain.invoke({"question": search_query})
 
         sources = []
         source_scores = {}
@@ -312,11 +358,13 @@ class QdrantRetrieverWrapper(BaseRetriever):
 
     def _get_relevant_documents(self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None) -> List[Document]:
         query_embedding = self.embeddings.embed_query(query)
+        filter_dict = retrieval_filter_ctx.get()
 
         results = self.vector_store.search(
             query_embedding=query_embedding,
             top_k=settings.retrieval_fetch_k,
-            score_threshold=settings.retrieval_score_threshold ,
+            filter_dict=filter_dict,
+            score_threshold=settings.retrieval_score_threshold,
         )
         results = results[:settings.top_k]
         logger.info("Top scores: %s", [round(r["score"], 3) for r in results[:5]])

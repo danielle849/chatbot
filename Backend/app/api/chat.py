@@ -49,11 +49,10 @@ async def chat(
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-           # logger.info(f"type(message.message)={type(message.message)} value={message.message!r}")
-           # logger.info(f"type(message.conversation_id)={type(message.conversation_id)} value={message.conversation_id!r}")
             rag_chain.query,
             message.message,
-            message.conversation_id
+            message.conversation_id,
+            message.category_id,
         )
         
         return ChatResponse(
@@ -83,7 +82,8 @@ async def chat_stream(
                 None,
                 rag_chain.query,
                 message.message,
-                message.conversation_id
+                message.conversation_id,
+                message.category_id,
             )
             
             # Stream response word by word

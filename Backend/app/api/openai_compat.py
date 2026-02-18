@@ -76,6 +76,17 @@ def get_conversation_id(
     return None
 
 
+def get_category_id(request: Request) -> int | None:
+    """Read Zammad category_id from X-Category-Id header (e.g. 43 for WordPress)."""
+    hdr = request.headers.get("x-category-id")
+    if not hdr or not hdr.strip():
+        return None
+    try:
+        return int(hdr.strip())
+    except ValueError:
+        return None
+
+
 @router.get("/models", response_model=OpenAIModelList)
 def list_models(api_key: str = Depends(verify_api_key)):
     now = int(time.time())
@@ -107,6 +118,7 @@ async def chat_completions(
         )
 
     conversation_id = get_conversation_id(payload, request)
+    category_id = get_category_id(request)
     loop = asyncio.get_event_loop()
 
     # STREAMING MODE
@@ -132,6 +144,7 @@ async def chat_completions(
                     rag_chain.query,
                     user_text,
                     conversation_id,
+                    category_id,
                 )
                 answer = result["answer"]
                 sources = result.get("sources", [])
@@ -204,7 +217,10 @@ async def chat_completions(
     try:
         result = await loop.run_in_executor(
             None,
-            rag_chain.query, user_text, conversation_id,
+            rag_chain.query,
+            user_text,
+            conversation_id,
+            category_id,
         )
 
         sources = result.get("sources", [])

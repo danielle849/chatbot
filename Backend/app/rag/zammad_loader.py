@@ -1,7 +1,8 @@
 """Zammad data loader for tickets and knowledge base entries."""
-from typing import List, Dict, Optional
-from datetime import datetime
+from typing import List, Dict, Optional, Tuple
 import hashlib
+import re
+from bs4 import BeautifulSoup
 from app.rag.zammad_client import ZammadClient
 from app.config import settings
 from app.utils.logger import logger
@@ -130,8 +131,59 @@ class ZammadLoader:
             logger.error(f"Error loading tickets from Zammad: {e}")
             return []
     
+    def _split_kb_body_into_blocks(self, body: str, title: str) -> List[Tuple[str, str]]:
+        """Split KB body into FAQ-style blocks. 1 Q&A = 1 block for better retrieval.
+        
+        Handles common patterns: Frage/Antwort, headings (h2/h3), Q:/A:, etc.
+        Returns list of (block_content, block_label) - each becomes one indexed document.
+        """
+        if not body or not body.strip():
+            return [("(Leerer Eintrag)", title)]
+        try:
+            soup = BeautifulSoup(body, 'html.parser')
+            text = soup.get_text(separator='\n', strip=True)
+        except Exception:
+            text = body
+        blocks: List[Tuple[str, str]] = []
+        # Split by common FAQ/heading delimiters (case-insensitive)
+        parts = re.split(
+            r'(?=\s*(?:Frage|Antwort|FRAGE|ANTWORT|Q:|A:)\s*[:\s]|\n#{1,3}\s+|\n\*\*[^*]+\*\*\s*\n)',
+            text,
+            flags=re.IGNORECASE
+        )
+        parts = [p.strip() for p in parts if p.strip() and len(p.strip()) > 15]
+        if len(parts) > 1:
+            for i, part in enumerate(parts):
+                blocks.append((part, f"{title} (Teil {i + 1})"))
+        if not blocks:
+            # No clear structure: split by double newlines into ~500 char segments
+            max_chars = 500
+            segments = re.split(r'\n\s*\n', text)
+            current = []
+            current_len = 0
+            for seg in segments:
+                seg = seg.strip()
+                if not seg:
+                    continue
+                if current_len + len(seg) > max_chars and current:
+                    blocks.append(("\n\n".join(current), title))
+                    current = [seg]
+                    current_len = len(seg)
+                else:
+                    current.append(seg)
+                    current_len += len(seg)
+            if current:
+                blocks.append(("\n\n".join(current), title))
+        if not blocks:
+            blocks.append((text, title))
+        return blocks
+
     def load_knowledge_base_entries(self, kb_id: Optional[int] = None) -> List[Dict]:
-        """Load knowledge base entries from Zammad."""
+        """Load knowledge base entries from Zammad.
+        
+        Each KB entry is split into FAQ-style blocks when possible (1 Q&A per document)
+        to avoid mixing unrelated topics in one chunk and improve retrieval precision.
+        """
         documents = []
         
         try:
@@ -152,46 +204,48 @@ class ZammadLoader:
                     entry_id = entry.get('id')
                     title = entry.get('title', f'KB Entry #{entry_id}')
                     body = entry.get('body', '')
-                    kb_id = entry.get('knowledge_base_id')
+                    kb_id_val = entry.get('knowledge_base_id')
                     category_id = entry.get('category_id')
                     created_at = entry.get('created_at')
                     updated_at = entry.get('updated_at')
                     
-                    # Combine entry info into document
-                    entry_text = f"Knowledge Base Entry\n"
-                    entry_text += f"Title: {title}\n"
-                    entry_text += f"Knowledge Base ID: {kb_id}\n"
-                    entry_text += f"Category ID: {category_id}\n"
-                    entry_text += f"Created: {created_at}\n"
-                    entry_text += f"Updated: {updated_at}\n\n"
-                    entry_text += f"Content:\n{body}"
+                    base_metadata = {
+                        'kb_entry_id': entry_id,
+                        'knowledge_base_id': kb_id_val,
+                        'category_id': category_id,
+                        'created_at': created_at,
+                        'updated_at': updated_at
+                    }
                     
-                    # Generate document ID
-                    doc_id = self._generate_doc_id(f"zammad_kb_{entry_id}")
+                    blocks = self._split_kb_body_into_blocks(body, title)
+                    for idx, (block_content, block_label) in enumerate(blocks):
+                        entry_text = (
+                            f"Knowledge Base Entry\n"
+                            f"Title: {block_label}\n"
+                            f"Knowledge Base ID: {kb_id_val}\n"
+                            f"Category ID: {category_id}\n"
+                            f"Created: {created_at}\n"
+                            f"Updated: {updated_at}\n\n"
+                            f"Content:\n{block_content}"
+                        )
+                        doc_id = self._generate_doc_id(f"zammad_kb_{entry_id}_{idx}")
+                        documents.append({
+                            'id': doc_id,
+                            'source': 'zammad_kb',
+                            'source_id': str(entry_id),
+                            'title': block_label,
+                            'text': entry_text,
+                            'metadata': {**base_metadata, 'block_index': idx},
+                            'attachments': []
+                        })
                     
-                    documents.append({
-                        'id': doc_id,
-                        'source': 'zammad_kb',
-                        'source_id': str(entry_id),
-                        'title': title,
-                        'text': entry_text,
-                        'metadata': {
-                            'kb_entry_id': entry_id,
-                            'knowledge_base_id': kb_id,
-                            'category_id': category_id,
-                            'created_at': created_at,
-                            'updated_at': updated_at
-                        },
-                        'attachments': []  # KB entries might have attachments too
-                    })
-                    
-                    logger.info(f"Loaded KB entry: {title}")
+                    logger.info(f"Loaded KB entry: {title} ({len(blocks)} block(s))")
                     
                 except Exception as e:
                     logger.error(f"Error processing KB entry {entry.get('id')}: {e}", exc_info=True)
                     continue
             
-            logger.info(f"Loaded {len(documents)} knowledge base entries from Zammad")
+            logger.info(f"Loaded {len(documents)} knowledge base documents from Zammad")
             return documents
             
         except Exception as e:

@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     # LLM Parameters
     temperature: float = 0.7
     max_tokens: int = 512 #128
-    top_k: int = 6 #3  # Number of documents to retrieve
+    top_k: int = 4  # Number of documents to retrieve (reduced to avoid irrelevant context)
 
     # Retrieval Optimization
-    retrieval_score_threshold: float = 0.1  # Minimum similarity score (0.0-1.0)
-    retrieval_fetch_k: int = 30 #10  # Fetch more candidates before filtering
+    retrieval_score_threshold: float = 0.35  # Minimum similarity score (0.0-1.0)
+    retrieval_fetch_k: int = 15  # Fetch candidates before filtering
     use_mmr: bool = False  # Maximal Marginal Relevance for diversity
     mmr_diversity: float = 0.5  # MMR diversity parameter (0.0-1.0)
     

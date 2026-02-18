@@ -3,12 +3,33 @@ from typing import List, Dict, Optional
 from pathlib import Path
 import hashlib
 import os
+import re
 
 # Use pypdf for PDFs to avoid onnxruntime dependency
 from pypdf import PdfReader
 
 from app.config import settings
 from app.utils.logger import logger
+
+
+def redact_sensitive(text: str) -> str:
+    """Redact emails, API keys, and similar credentials to prevent leaks in RAG output."""
+    if not text or not isinstance(text, str):
+        return text
+    # Email addresses
+    text = re.sub(
+        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+        '[EMAIL_REDACTED]',
+        text
+    )
+    # api_key=xxx, token=xxx, password=xxx (common patterns)
+    text = re.sub(
+        r'(api[_-]?key|token|password|secret)\s*[:=]\s*["\']?\S+["\']?',
+        r'\1: [REDACTED]',
+        text,
+        flags=re.IGNORECASE
+    )
+    return text
 
 # Import unstructured functions for non-PDF formats only
 # Avoid importing PDF-related modules to prevent onnxruntime loading
@@ -136,6 +157,8 @@ class DocumentProcessor:
                 
                 if not chunk_text.strip():
                     continue
+
+                chunk_text = redact_sensitive(chunk_text)
                 
                 chunk_metadata = {
                     "doc_id": doc_id,
